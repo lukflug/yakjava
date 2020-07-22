@@ -1,22 +1,10 @@
+#include "util.bas"
 
 dim shared as string labelNames(any)
 dim shared as integer labelNumbers(any)
 dim shared as string lines(any)
 dim shared as string variableName(any)
 dim shared as integer variableValue(any)
-
-function checkIfValid (nam as string) as integer
-    if nam="if" or nam="goto" or nam="print" or nam="true" or nam="false" then
-        return false
-    end if
-    for i as integer=1 to len(nam)
-        dim as integer char=asc(mid(nam,i,1))
-        if not (char>=asc("A") and char<=asc("Z")) and not (char>=asc("a") and char<=asc("z")) and not (char>=asc("0") and char<=asc("9")) and not mid(nam,i,1)="_" then
-            return false
-        end if
-    next
-    return true
-end function
 
 sub addLabel (label as string, linenum as integer)
     if not checkIfValid(label) then
@@ -35,8 +23,8 @@ sub addLine (codeline as string)
 end sub
 
 if command(1)="" then
-    print "lukflug's YakJava interpreter Version 0.0.0"
-    print "21.07.2020"
+    print "lukflug's YakJava Interpreter Version 0.0.1"
+    print "22.07.2020"
     print "Usage: yakjava <code file>"
     system
 end if
@@ -45,6 +33,7 @@ if open(command(1) for input as #1)<>0 then
     print "Fatal: Could not open file '"+command(1)+"'!"
     system
 end if
+
 
 dim as integer linenum=0
 
@@ -73,34 +62,61 @@ while not eof(1)
         addLabel(trim(mid(codeline,1,sep-1)),linenum)
         codeline=trim(mid(codeline,sep+1))
     end if
-    addLine(codeline)
+    if mid(codeline,len(codeline),1)<>";" and codeline<>"" then
+        print "Error: Missing semicolon at line "+str(linenum)
+        system
+    end if
+    if codeline<>"" then
+        addLine(mid(codeline,1,len(codeline)-1))
+    else
+        addLine("")
+    end if
 wend
 
 close #1
 
-function replace (byval original as string, oldstr as string, newstr as string) as string
-    dim as integer position=1
-    while true
-        dim as integer location=instr(position,original,oldstr)
-        if location>0 then
-            original=mid(original,1,location-1)+newstr+mid(original,location+len(oldstr))
-            position=location
-        else
-            exit while
-        end if
-    wend
-    return original
+
+function getValue (part as string, linenum as integer) as string
+    if part="input" then
+        while true
+            print "(y/n) ";
+            dim as integer key=getkey
+            if key=asc("y") or key=asc("Y") then
+                print "y"
+                return "true"
+            elseif key=asc("n") or key=asc("N") then
+                print "n"
+                return "false"
+            end if
+        wend
+    elseif part="true" or part="false" or part="" then
+        return part
+    else
+        dim found as integer=false
+        for i as integer=lbound(variableName) to ubound(variableName)
+            if variableName(i)=part then
+                if variableValue(i) then return "true"
+                return "false"
+            end if
+        next
+    end if
+    print "Error: Line "+str(linenum)+": Variable '"+part+"' not defined!"
+    system
 end function
 
-function exprEval (byval expr as string) as integer
-    for i as integer=lbound(variableName) to ubound(variableName)
-        if variableValue(i)=true then
-            expr=replace(expr,variableName(i),"true")
-        else
-            expr=replace(expr,variableName(i),"false")
+function exprEval (byval rawexpr as string, linenum as integer) as integer
+    dim as integer lastChar=0
+    dim as string expr=""
+    replace(rawexpr," ","")
+    for i as integer=1 to len(rawexpr)
+        dim as integer char=asc(mid(rawexpr,i,1))
+        if not (char>=asc("A") and char<=asc("Z")) and not (char>=asc("a") and char<=asc("z")) and not (char>=asc("0") and char<=asc("9")) and not mid(rawexpr,i,1)="_" then
+            expr+=getValue(mid(rawexpr,lastChar+1,i-lastChar-1),linenum)
+            lastChar=i
+            expr+=mid(rawexpr,i,1)
         end if
     next
-    replace(expr," ","")
+    expr+=getValue(mid(rawexpr,lastChar+1),linenum)
     while true
         dim as integer oldlen=len(expr)
         ' 1. OR
@@ -137,7 +153,8 @@ function exprEval (byval expr as string) as integer
         end if
         if oldlen=len(expr) then exit while
     wend
-    return 1
+    print "Error: Line "+str(linenum)+": Syntax error while parsing expression!"
+    system
 end function
 
 sub addVariable (variable as string, value as integer, linenum as integer)
@@ -177,13 +194,11 @@ function interpretInstruction (linenum as integer, codeline as string) as intege
             print "Error: Line "+str(linenum)+": Syntax error while parsing expression!"
             system
         end if
-        dim as integer condition=exprEval(mid(codeline,instr(codeline,"("),separator-instr(codeline,"(")+1))
+        dim as integer condition=exprEval(mid(codeline,instr(codeline,"("),separator-instr(codeline,"(")+1),linenum)
         if condition=true then
             interpretInstruction(linenum,trim(mid(codeline,separator+1)))
         elseif condition=false then
         else
-            print "Error: Line "+str(linenum)+": Syntax error while parsing expression!"
-            system
         end if
     elseif mid(codeline,1,5)="goto " then
         for i as integer=lbound(labelNames) to ubound(labelNames)
@@ -193,27 +208,21 @@ function interpretInstruction (linenum as integer, codeline as string) as intege
         next
         print "Error: Line "+str(linenum)+": Undefined label '"+mid(codeline,6)+"!"
         system
-    elseif mid(codeline,1,6)="print " then
-        dim as integer value=exprEval(mid(codeline,7))
-        if value=true then
+    elseif mid(codeline,1,6)="print(" or mid(codeline,1,7)="print (" then
+        dim as integer value=exprEval(mid(codeline,instr(codeline,"(")),linenum)
+        if value then
             print "true"
-        elseif value=false then
-            print "false"
         else
-            print "Error: Line "+str(linenum)+": Syntax error while parsing expression!"
-            system
+            print "false"
         end if
     else
         dim as integer separator=instr(codeline,"=")
         if separator>0 then
-            dim as integer value=exprEval(mid(codeline,separator+1))
-            if value=true then
+            dim as integer value=exprEval(mid(codeline,separator+1),linenum)
+            if value then
                 addVariable(trim(mid(codeline,1,separator-1)),true,linenum)
-            elseif value=false then
-                addVariable(trim(mid(codeline,1,separator-1)),false,linenum)
             else
-                print "Error: Line "+str(linenum)+": Syntax error while parsing expression!"
-                system
+                addVariable(trim(mid(codeline,1,separator-1)),false,linenum)
             end if
         else
             print "Error: Line "+str(linenum)+": Syntax error!"
