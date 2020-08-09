@@ -3,7 +3,8 @@ Simple programming language consisting of only booleans.
 
 
 Example:
-```a=input;
+```
+a=input;
 rep:
 if (a!=true) print a;
 goto rep;
